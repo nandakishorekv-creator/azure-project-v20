@@ -1,8 +1,8 @@
 # Azure Pipelines YAML for MuleSoft Projects
-# ✅ Maven 3.9.10 (exact version - manually installed)
+# ✅ Maven 3.9.10 (REQUIRED - Mule Maven Plugin 4.6.0 max compatibility)
 # ✅ Java 17
 # ✅ Mule Maven Plugin 4.6.0
-# ✅ Connected App Bearer Token via settings.xml
+# ✅ Multiple mirror fallback for reliable downloads
 
 trigger:
   branches:
@@ -39,77 +39,104 @@ stages:
               jdkSourceOption: 'PreInstalled'
 
           # ════════════════════════════════════════════════════════════
-          # STEP 2: Install Maven 3.9.10 (Exact Version)
+          # STEP 2: Install Maven 3.9.10 (Multiple Mirrors)
           # ════════════════════════════════════════════════════════════
           - script: |
               set -e
-              echo "🔧 Installing Maven 3.9.10 (exact version)..."
-              echo ""
-              
-              # Show current Maven (will be replaced)
-              echo "Current Maven (pre-installed):"
-              mvn --version 2>/dev/null || echo "  Not found"
+              echo "🔧 Installing Maven 3.9.10 (REQUIRED for Mule Maven Plugin 4.6.0)"
               echo ""
               
               # Clean up any existing installations
               sudo rm -rf /opt/maven /usr/share/maven 2>/dev/null || true
               
-              # Download Maven 3.9.10 from Apache archive
-              MAVEN_URL="https://archive.apache.org/dist/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+              # Define multiple mirror URLs (in order of preference)
+              MIRRORS=(
+                "https://dlcdn.apache.org/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+                "https://downloads.apache.org/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+                "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.10/apache-maven-3.9.10-bin.tar.gz"
+                "https://archive.apache.org/dist/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+                "https://mirrors.estointernet.in/apache/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+                "https://mirror.cc.columbia.edu/pub/software/apache/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+              )
               
-              echo "Downloading Maven 3.9.10..."
-              echo "URL: $MAVEN_URL"
+              SUCCESS=0
               
-              # Try wget first, fallback to curl
-              if command -v wget &> /dev/null; then
-                wget --timeout=300 --tries=3 -O /tmp/maven.tar.gz "$MAVEN_URL"
-              else
-                curl -fsSL --connect-timeout 30 --max-time 300 --retry 3 -o /tmp/maven.tar.gz "$MAVEN_URL"
-              fi
+              for mirror in "${MIRRORS[@]}"; do
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "🔄 Trying mirror: $mirror"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                
+                # Try with curl (10 second connect timeout, 2 minute total timeout)
+                if curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 \
+                   -o /tmp/maven.tar.gz "$mirror" 2>&1 | tee curl.log; then
+                  
+                  # Verify download size
+                  if [ -f /tmp/maven.tar.gz ]; then
+                    FILE_SIZE=$(stat -c%s /tmp/maven.tar.gz)
+                    echo "✅ Download successful: $FILE_SIZE bytes"
+                    
+                    if [ $FILE_SIZE -gt 8000000 ]; then
+                      echo "✅ File size valid (> 8MB)"
+                      SUCCESS=1
+                      break
+                    else
+                      echo "⚠️  File too small ($FILE_SIZE bytes), trying next mirror..."
+                      rm -f /tmp/maven.tar.gz
+                    fi
+                  fi
+                else
+                  echo "❌ Failed with curl, trying next mirror..."
+                fi
+                
+                echo ""
+              done
               
-              # Verify download
-              if [ ! -f /tmp/maven.tar.gz ]; then
-                echo "❌ ERROR: Download failed"
+              if [ $SUCCESS -eq 0 ]; then
+                echo "❌ ERROR: All mirrors failed!"
+                echo ""
+                echo "TROUBLESHOOTING:"
+                echo "1. Network connectivity issues from Azure datacenter"
+                echo "2. All Apache mirrors are down (rare)"
+                echo ""
+                echo "WORKAROUND:"
+                echo "Use Maven 3.9.11 (pre-installed) instead"
+                echo "It should work with Mule Maven Plugin 4.6.0"
                 exit 1
               fi
               
-              FILE_SIZE=$(stat -c%s /tmp/maven.tar.gz)
-              echo "✅ Downloaded: $FILE_SIZE bytes"
-              
-              # Extract Maven
               echo ""
-              echo "Extracting Maven..."
+              echo "📦 Extracting Maven..."
+              
+              # Extract
               sudo mkdir -p /opt/maven
               sudo tar -xzf /tmp/maven.tar.gz -C /opt/maven --strip-components=1
               
-              # Set permissions
-              sudo chmod +x /opt/maven/bin/mvn
-              
-              # Verify installation
+              # Verify extraction
               if [ ! -f /opt/maven/bin/mvn ]; then
                 echo "❌ ERROR: Maven binary not found after extraction"
                 exit 1
               fi
               
-              echo "✅ Maven extracted successfully"
-              echo ""
+              # Set permissions
+              sudo chmod +x /opt/maven/bin/mvn
               
               # Verify version
               INSTALLED_VERSION=$(/opt/maven/bin/mvn --version | grep "Apache Maven" | awk '{print $3}')
-              echo "Installed Maven version: $INSTALLED_VERSION"
+              echo ""
+              echo "Installed version: $INSTALLED_VERSION"
               
               if [ "$INSTALLED_VERSION" = "3.9.10" ]; then
-                echo "✅ Version verification PASSED"
+                echo "✅ Maven 3.9.10 installation SUCCESSFUL"
               else
                 echo "❌ ERROR: Expected 3.9.10, got $INSTALLED_VERSION"
                 exit 1
               fi
               
               # Cleanup
-              rm -f /tmp/maven.tar.gz
+              rm -f /tmp/maven.tar.gz curl.log
               
               echo ""
-              echo "✅ Maven 3.9.10 installation complete!"
+              echo "🎉 Maven 3.9.10 ready for use!"
             displayName: 'Install Maven 3.9.10'
 
           # ════════════════════════════════════════════════════════════
@@ -181,8 +208,19 @@ stages:
               echo "=== Maven ==="
               export PATH=/opt/maven/bin:$PATH
               /opt/maven/bin/mvn --version
-              echo ""
               
+              # Verify exact version
+              MVN_VERSION=$(/opt/maven/bin/mvn --version | grep "Apache Maven" | awk '{print $3}')
+              if [ "$MVN_VERSION" = "3.9.10" ]; then
+                echo "✅ Maven version confirmed: 3.9.10"
+              else
+                echo "❌ ERROR: Maven version mismatch"
+                echo "   Expected: 3.9.10"
+                echo "   Got: $MVN_VERSION"
+                exit 1
+              fi
+              
+              echo ""
               echo "=== Settings.xml ==="
               ls -lh ~/.m2/settings.xml
               echo ""
@@ -213,7 +251,7 @@ stages:
               echo "🔨 Running Maven clean compile..."
               echo ""
               
-              /opt/maven/bin/mvn clean compile \
+              mvn clean compile \
                 -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
                 -Dsecure.key=mule \
                 -Dmule.env=dev
@@ -231,7 +269,7 @@ stages:
           #     
           #     echo "🧪 Running MUnit tests..."
           #     
-          #     /opt/maven/bin/mvn test \
+          #     mvn test \
           #       -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
           #       -Dsecure.key=mule \
           #       -Dmule.env=dev
@@ -248,7 +286,7 @@ stages:
               echo "📦 Running Maven package..."
               echo ""
               
-              /opt/maven/bin/mvn package \
+              mvn package \
                 -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
                 -Dsecure.key=mule \
                 -Dmule.env=dev \
@@ -291,6 +329,8 @@ stages:
           # STEP 12: Build Summary
           # ════════════════════════════════════════════════════════════
           - script: |
+              export PATH=/opt/maven/bin:$PATH
+              
               echo ""
               echo "══════════════════════════════════════════════════════"
               echo "🎉 BUILD COMPLETED SUCCESSFULLY"
@@ -299,7 +339,7 @@ stages:
               echo "Artifacts:"
               ls -lh target/*.jar 2>/dev/null || echo "No artifacts found"
               echo ""
-              echo "Maven Version: 3.9.10"
+              echo "Maven Version: $(mvn --version | grep "Apache Maven" | awk '{print $3}')"
               echo "Java Version: 17"
               echo "Mule Maven Plugin: 4.6.0"
               echo ""
@@ -324,11 +364,20 @@ stages:
   #             steps:
   #               # Re-install Maven 3.9.10
   #               - script: |
-  #                   wget -q -O /tmp/maven.tar.gz https://archive.apache.org/dist/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz
-  #                   sudo rm -rf /opt/maven
-  #                   sudo mkdir -p /opt/maven
-  #                   sudo tar -xzf /tmp/maven.tar.gz -C /opt/maven --strip-components=1
-  #                   rm -f /tmp/maven.tar.gz
+  #                   MIRRORS=(
+  #                     "https://dlcdn.apache.org/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+  #                     "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.10/apache-maven-3.9.10-bin.tar.gz"
+  #                   )
+  #                   
+  #                   for mirror in "${MIRRORS[@]}"; do
+  #                     if curl -fsSL --connect-timeout 10 --max-time 120 -o /tmp/maven.tar.gz "$mirror"; then
+  #                       sudo rm -rf /opt/maven
+  #                       sudo mkdir -p /opt/maven
+  #                       sudo tar -xzf /tmp/maven.tar.gz -C /opt/maven --strip-components=1
+  #                       rm -f /tmp/maven.tar.gz
+  #                       break
+  #                     fi
+  #                   done
   #                 displayName: 'Setup Maven for Deploy'
   #               
   #               # Re-download settings.xml
@@ -349,9 +398,10 @@ stages:
   #               # Deploy to CloudHub
   #               - script: |
   #                   export PATH=/opt/maven/bin:$PATH
+  #                   export MAVEN_OPTS="-Xmx3072m"
   #                   cd $(Pipeline.Workspace)/drop
   #                   
-  #                   /opt/maven/bin/mvn deploy \
+  #                   mvn deploy \
   #                     -DskipTests \
   #                     -Dmule.version=4.9.0 \
   #                     -Dcloudhub.environment=Sandbox \
