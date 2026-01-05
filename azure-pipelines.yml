@@ -1,7 +1,8 @@
 # Azure Pipelines YAML for MuleSoft Projects
-# ✅ FIXED: Path to settings.xml (removed -s flag, using default location)
-# ✅ Java 17 + Mule Maven Plugin 4.6.0
-# ✅ Connected App authentication via settings.xml from Secure Files
+# ✅ Maven 3.9.10 (exact version - manually installed)
+# ✅ Java 17
+# ✅ Mule Maven Plugin 4.6.0
+# ✅ Connected App Bearer Token via settings.xml
 
 trigger:
   branches:
@@ -13,10 +14,12 @@ pool:
 
 variables:
   - group: build.variables
-  - name: disable.coverage.autogenerate
-    value: 'true'
+  - name: MAVEN_VERSION
+    value: '3.9.10'
   - name: MAVEN_CACHE_FOLDER
     value: $(Pipeline.Workspace)/.m2/repository
+  - name: MAVEN_OPTS
+    value: '-Xmx3072m'
 
 stages:
   - stage: Build
@@ -25,58 +28,135 @@ stages:
       - job: BuildAndTest
         displayName: 'Build and Test Job'
         steps:
-          # ✅ STEP 1: Download settings.xml from Azure Secure Files
-          - task: DownloadSecureFile@1
-            name: mavenSettings
-            displayName: 'Download Maven Settings from Secure Files'
-            inputs:
-              secureFile: 'settings.xml'
-          
-          # ✅ STEP 2: Install settings.xml to Maven directory
-          - script: |
-              echo "📦 Installing Maven settings.xml..."
-              mkdir -p ~/.m2
-              cp $(mavenSettings.secureFilePath) ~/.m2/settings.xml
-              
-              echo "✅ settings.xml installed successfully"
-              echo "Location: ~/.m2/settings.xml"
-              
-              # Verify file exists
-              if [ -f ~/.m2/settings.xml ]; then
-                echo "✅ Verified: settings.xml exists"
-                FILE_SIZE=$(stat -c%s ~/.m2/settings.xml)
-                echo "File size: $FILE_SIZE bytes"
-                echo "Absolute path: $(readlink -f ~/.m2/settings.xml)"
-              else
-                echo "❌ ERROR: settings.xml not found!"
-                exit 1
-              fi
-              
-              # Show structure (without credentials)
-              echo ""
-              echo "Settings.xml structure:"
-              echo "Servers configured:"
-              grep -A 2 "<server>" ~/.m2/settings.xml | grep "<id>" | sed 's/<[^>]*>//g' | sed 's/^[ \t]*/  - /' || echo "  Could not parse"
-              
-              # Check authentication type
-              if grep -q "Bearer" ~/.m2/settings.xml; then
-                echo "Authentication: Bearer Token (Connected App) ✅"
-              elif grep -q "<username>" ~/.m2/settings.xml; then
-                echo "Authentication: Username/Password"
-              else
-                echo "⚠️ WARNING: No authentication found!"
-              fi
-            displayName: 'Install Maven Settings'
-
-          # ✅ STEP 3: Setup Java 17
+          # ════════════════════════════════════════════════════════════
+          # STEP 1: Setup Java 17
+          # ════════════════════════════════════════════════════════════
           - task: JavaToolInstaller@0
-            displayName: 'Install Java 17'
+            displayName: 'Setup Java 17'
             inputs:
               versionSpec: '17'
               jdkArchitectureOption: 'x64'
               jdkSourceOption: 'PreInstalled'
 
-          # ✅ STEP 4: Cache Maven dependencies
+          # ════════════════════════════════════════════════════════════
+          # STEP 2: Install Maven 3.9.10 (Exact Version)
+          # ════════════════════════════════════════════════════════════
+          - script: |
+              set -e
+              echo "🔧 Installing Maven 3.9.10 (exact version)..."
+              echo ""
+              
+              # Show current Maven (will be replaced)
+              echo "Current Maven (pre-installed):"
+              mvn --version 2>/dev/null || echo "  Not found"
+              echo ""
+              
+              # Clean up any existing installations
+              sudo rm -rf /opt/maven /usr/share/maven 2>/dev/null || true
+              
+              # Download Maven 3.9.10 from Apache archive
+              MAVEN_URL="https://archive.apache.org/dist/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+              
+              echo "Downloading Maven 3.9.10..."
+              echo "URL: $MAVEN_URL"
+              
+              # Try wget first, fallback to curl
+              if command -v wget &> /dev/null; then
+                wget --timeout=300 --tries=3 -O /tmp/maven.tar.gz "$MAVEN_URL"
+              else
+                curl -fsSL --connect-timeout 30 --max-time 300 --retry 3 -o /tmp/maven.tar.gz "$MAVEN_URL"
+              fi
+              
+              # Verify download
+              if [ ! -f /tmp/maven.tar.gz ]; then
+                echo "❌ ERROR: Download failed"
+                exit 1
+              fi
+              
+              FILE_SIZE=$(stat -c%s /tmp/maven.tar.gz)
+              echo "✅ Downloaded: $FILE_SIZE bytes"
+              
+              # Extract Maven
+              echo ""
+              echo "Extracting Maven..."
+              sudo mkdir -p /opt/maven
+              sudo tar -xzf /tmp/maven.tar.gz -C /opt/maven --strip-components=1
+              
+              # Set permissions
+              sudo chmod +x /opt/maven/bin/mvn
+              
+              # Verify installation
+              if [ ! -f /opt/maven/bin/mvn ]; then
+                echo "❌ ERROR: Maven binary not found after extraction"
+                exit 1
+              fi
+              
+              echo "✅ Maven extracted successfully"
+              echo ""
+              
+              # Verify version
+              INSTALLED_VERSION=$(/opt/maven/bin/mvn --version | grep "Apache Maven" | awk '{print $3}')
+              echo "Installed Maven version: $INSTALLED_VERSION"
+              
+              if [ "$INSTALLED_VERSION" = "3.9.10" ]; then
+                echo "✅ Version verification PASSED"
+              else
+                echo "❌ ERROR: Expected 3.9.10, got $INSTALLED_VERSION"
+                exit 1
+              fi
+              
+              # Cleanup
+              rm -f /tmp/maven.tar.gz
+              
+              echo ""
+              echo "✅ Maven 3.9.10 installation complete!"
+            displayName: 'Install Maven 3.9.10'
+
+          # ════════════════════════════════════════════════════════════
+          # STEP 3: Download settings.xml from Secure Files
+          # ════════════════════════════════════════════════════════════
+          - task: DownloadSecureFile@1
+            name: mavenSettings
+            displayName: 'Download settings.xml'
+            inputs:
+              secureFile: 'settings.xml'
+
+          # ════════════════════════════════════════════════════════════
+          # STEP 4: Install settings.xml to ~/.m2/
+          # ════════════════════════════════════════════════════════════
+          - script: |
+              echo "📦 Installing settings.xml..."
+              
+              # Create .m2 directory
+              mkdir -p ~/.m2
+              
+              # Copy settings.xml
+              cp $(mavenSettings.secureFilePath) ~/.m2/settings.xml
+              
+              # Verify installation
+              if [ ! -f ~/.m2/settings.xml ]; then
+                echo "❌ ERROR: settings.xml not found after copy"
+                exit 1
+              fi
+              
+              echo "✅ settings.xml installed"
+              echo "Location: ~/.m2/settings.xml"
+              echo "Size: $(stat -c%s ~/.m2/settings.xml) bytes"
+              echo ""
+              
+              # Check authentication type
+              if grep -q "Bearer" ~/.m2/settings.xml; then
+                echo "✅ Authentication: Bearer Token (Connected App)"
+              elif grep -q "<username>" ~/.m2/settings.xml; then
+                echo "⚠️  Authentication: Username/Password"
+              else
+                echo "❌ WARNING: No authentication found!"
+              fi
+            displayName: 'Install Maven Settings'
+
+          # ════════════════════════════════════════════════════════════
+          # STEP 5: Cache Maven Dependencies
+          # ════════════════════════════════════════════════════════════
           - task: Cache@2
             displayName: 'Cache Maven Dependencies'
             inputs:
@@ -86,118 +166,109 @@ stages:
                 maven
               path: $(MAVEN_CACHE_FOLDER)
 
-          # ✅ STEP 5: Verify Environment
+          # ════════════════════════════════════════════════════════════
+          # STEP 6: Verify Environment
+          # ════════════════════════════════════════════════════════════
           - script: |
-              echo "🔍 Verifying build environment..."
-              echo "=========================================="
-              
+              echo "🔍 Build Environment Verification"
+              echo "══════════════════════════════════════════════════════"
               echo ""
-              echo "=== Java Version ==="
-              java -version
               
+              echo "=== Java ==="
+              java -version 2>&1 | head -3
               echo ""
-              echo "=== Maven Version ==="
-              mvn --version
               
+              echo "=== Maven ==="
+              export PATH=/opt/maven/bin:$PATH
+              /opt/maven/bin/mvn --version
               echo ""
-              echo "=== Settings Location ==="
+              
+              echo "=== Settings.xml ==="
               ls -lh ~/.m2/settings.xml
-              echo "Absolute path: $(readlink -f ~/.m2/settings.xml)"
-              
               echo ""
-              echo "=== Home Directory ==="
-              echo "HOME=$HOME"
-              echo "User: $(whoami)"
-              echo "Working directory: $(pwd)"
               
-              echo ""
               echo "=== POM Configuration ==="
               if [ -f pom.xml ]; then
-                echo "Mule Maven Plugin Version:"
-                grep "mule.maven.plugin.version" pom.xml || echo "  Not found"
+                echo "Project:"
+                grep -E "<groupId>|<artifactId>|<version>|<packaging>" pom.xml | head -4
                 echo ""
-                echo "Java Compiler Version:"
-                grep "maven.compiler.source\|maven.compiler.target" pom.xml || echo "  Not found"
+                echo "Mule Maven Plugin:"
+                grep "mule.maven.plugin.version\|mule-maven-plugin" pom.xml | head -2
               else
-                echo "⚠️ pom.xml not found in current directory"
-                pwd
+                echo "⚠️  pom.xml not found"
               fi
               
               echo ""
-              echo "=========================================="
+              echo "══════════════════════════════════════════════════════"
               echo "✅ Environment verification complete"
-            displayName: 'Verify Build Environment'
+            displayName: 'Verify Environment'
 
-          # ✅ STEP 6: Maven Validate (test authentication)
-          # ⚠️ NO -s flag needed - Maven auto-uses ~/.m2/settings.xml
-          - task: Maven@4
-            displayName: 'Maven Validate (Test Auth)'
-            continueOnError: true
-            inputs:
-              mavenPomFile: 'pom.xml'
-              goals: 'validate'
-              options: '-X -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
-              publishJUnitResults: false
-              javaHomeOption: 'JDKVersion'
-              jdkVersionOption: '1.17'
-              mavenVersionOption: 'Default'
-              mavenOptions: '-Xmx3072m'
-
-          # ✅ STEP 7: Maven Clean Compile
-          - task: Maven@4
-            displayName: 'Maven Clean Compile'
-            inputs:
-              mavenPomFile: 'pom.xml'
-              goals: 'clean compile'
-              options: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev'
-              publishJUnitResults: false
-              javaHomeOption: 'JDKVersion'
-              jdkVersionOption: '1.17'
-              mavenVersionOption: 'Default'
-              mavenOptions: '-Xmx3072m'
-
-          # ✅ STEP 8: MUnit Tests (optional - uncomment to enable)
-          # - task: Maven@4
-          #   displayName: 'MUnit Tests'
-          #   continueOnError: true
-          #   inputs:
-          #     mavenPomFile: 'pom.xml'
-          #     goals: 'test'
-          #     options: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev'
-          #     publishJUnitResults: true
-          #     testResultsFiles: '**/surefire-reports/TEST-*.xml'
-          #     javaHomeOption: 'JDKVersion'
-          #     jdkVersionOption: '1.17'
-          #     mavenVersionOption: 'Default'
-          #     mavenOptions: '-Xmx3072m'
-
-          # ✅ STEP 9: Maven Package
-          - task: Maven@4
-            displayName: 'Maven Package'
-            inputs:
-              mavenPomFile: 'pom.xml'
-              goals: 'package'
-              options: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev -DskipTests'
-              publishJUnitResults: false
-              javaHomeOption: 'JDKVersion'
-              jdkVersionOption: '1.17'
-              mavenVersionOption: 'Default'
-              mavenOptions: '-Xmx3072m'
-
-          # ✅ STEP 10: Verify Package Created
+          # ════════════════════════════════════════════════════════════
+          # STEP 7: Maven Clean Compile
+          # ════════════════════════════════════════════════════════════
           - script: |
-              echo "📦 Verifying package creation..."
+              export PATH=/opt/maven/bin:$PATH
+              export MAVEN_OPTS="-Xmx3072m"
+              
+              echo "🔨 Running Maven clean compile..."
+              echo ""
+              
+              /opt/maven/bin/mvn clean compile \
+                -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
+                -Dsecure.key=mule \
+                -Dmule.env=dev
+              
+              echo ""
+              echo "✅ Compile successful"
+            displayName: 'Maven Clean Compile'
+
+          # ════════════════════════════════════════════════════════════
+          # STEP 8: Maven Test (Optional - Uncomment to Enable)
+          # ════════════════════════════════════════════════════════════
+          # - script: |
+          #     export PATH=/opt/maven/bin:$PATH
+          #     export MAVEN_OPTS="-Xmx3072m"
+          #     
+          #     echo "🧪 Running MUnit tests..."
+          #     
+          #     /opt/maven/bin/mvn test \
+          #       -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
+          #       -Dsecure.key=mule \
+          #       -Dmule.env=dev
+          #   displayName: 'Maven Test'
+          #   continueOnError: true
+
+          # ════════════════════════════════════════════════════════════
+          # STEP 9: Maven Package
+          # ════════════════════════════════════════════════════════════
+          - script: |
+              export PATH=/opt/maven/bin:$PATH
+              export MAVEN_OPTS="-Xmx3072m"
+              
+              echo "📦 Running Maven package..."
+              echo ""
+              
+              /opt/maven/bin/mvn package \
+                -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
+                -Dsecure.key=mule \
+                -Dmule.env=dev \
+                -DskipTests
+              
+              echo ""
+              echo "Checking for build artifacts..."
               if ls target/*.jar 1> /dev/null 2>&1; then
                 echo "✅ Package created successfully:"
                 ls -lh target/*.jar
               else
                 echo "❌ ERROR: No JAR file found in target/"
-                ls -la target/ || echo "target/ directory not found"
+                ls -la target/ 2>/dev/null || echo "target/ directory not found"
                 exit 1
               fi
-            displayName: 'Verify Package'
+            displayName: 'Maven Package'
 
-          # ✅ STEP 11: Copy Build Artifacts
+          # ════════════════════════════════════════════════════════════
+          # STEP 10: Copy Build Artifacts
+          # ════════════════════════════════════════════════════════════
           - task: CopyFiles@2
             displayName: 'Copy Build Artifacts'
             inputs:
@@ -207,14 +278,38 @@ stages:
               TargetFolder: $(Build.ArtifactStagingDirectory)
               flattenFolders: false
 
-          # ✅ STEP 12: Publish Pipeline Artifacts
+          # ════════════════════════════════════════════════════════════
+          # STEP 11: Publish Pipeline Artifacts
+          # ════════════════════════════════════════════════════════════
           - task: PublishPipelineArtifact@1
             displayName: 'Publish Pipeline Artifacts'
             inputs:
               targetPath: $(Build.ArtifactStagingDirectory)
               artifact: 'drop'
 
-  # ✅ DEPLOY STAGE: CloudHub Deployment (uncomment to enable)
+          # ════════════════════════════════════════════════════════════
+          # STEP 12: Build Summary
+          # ════════════════════════════════════════════════════════════
+          - script: |
+              echo ""
+              echo "══════════════════════════════════════════════════════"
+              echo "🎉 BUILD COMPLETED SUCCESSFULLY"
+              echo "══════════════════════════════════════════════════════"
+              echo ""
+              echo "Artifacts:"
+              ls -lh target/*.jar 2>/dev/null || echo "No artifacts found"
+              echo ""
+              echo "Maven Version: 3.9.10"
+              echo "Java Version: 17"
+              echo "Mule Maven Plugin: 4.6.0"
+              echo ""
+              echo "══════════════════════════════════════════════════════"
+            displayName: 'Build Summary'
+            condition: succeeded()
+
+  # ══════════════════════════════════════════════════════════════════
+  # DEPLOY STAGE (Optional - Uncomment to Enable CloudHub Deployment)
+  # ══════════════════════════════════════════════════════════════════
   # - stage: Deploy
   #   displayName: 'Deploy to CloudHub'
   #   dependsOn: Build
@@ -227,33 +322,39 @@ stages:
   #         runOnce:
   #           deploy:
   #             steps:
+  #               # Re-install Maven 3.9.10
+  #               - script: |
+  #                   wget -q -O /tmp/maven.tar.gz https://archive.apache.org/dist/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz
+  #                   sudo rm -rf /opt/maven
+  #                   sudo mkdir -p /opt/maven
+  #                   sudo tar -xzf /tmp/maven.tar.gz -C /opt/maven --strip-components=1
+  #                   rm -f /tmp/maven.tar.gz
+  #                 displayName: 'Setup Maven for Deploy'
+  #               
   #               # Re-download settings.xml
   #               - task: DownloadSecureFile@1
   #                 name: mavenSettingsDeploy
-  #                 displayName: 'Download Maven Settings'
   #                 inputs:
   #                   secureFile: 'settings.xml'
-                
+  #               
   #               - script: |
   #                   mkdir -p ~/.m2
   #                   cp $(mavenSettingsDeploy.secureFilePath) ~/.m2/settings.xml
-  #                   echo "✅ Settings installed for deployment"
-  #                 displayName: 'Install Maven Settings for Deploy'
-
+  #                 displayName: 'Install Maven Settings'
+  #               
   #               # Download build artifacts
   #               - download: current
   #                 artifact: drop
-  #                 displayName: 'Download Build Artifacts'
-
-  #               # Deploy to CloudHub (no -s flag needed)
-  #               - task: Maven@4
+  #               
+  #               # Deploy to CloudHub
+  #               - script: |
+  #                   export PATH=/opt/maven/bin:$PATH
+  #                   cd $(Pipeline.Workspace)/drop
+  #                   
+  #                   /opt/maven/bin/mvn deploy \
+  #                     -DskipTests \
+  #                     -Dmule.version=4.9.0 \
+  #                     -Dcloudhub.environment=Sandbox \
+  #                     -Danypoint.username=$(anypointUsername) \
+  #                     -Danypoint.password=$(anypointPassword)
   #                 displayName: 'Deploy to CloudHub'
-  #                 inputs:
-  #                   mavenPomFile: '$(Pipeline.Workspace)/drop/pom.xml'
-  #                   goals: 'deploy'
-  #                   options: '-DskipTests -Dmule.version=4.9.0 -Dcloudhub.environment=Sandbox -Danypoint.username=$(anypointUsername) -Danypoint.password=$(anypointPassword)'
-  #                   publishJUnitResults: false
-  #                   javaHomeOption: 'JDKVersion'
-  #                   jdkVersionOption: '1.17'
-  #                   mavenVersionOption: 'Default'
-  #                   mavenOptions: '-Xmx3072m'
