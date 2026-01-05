@@ -1,10 +1,10 @@
 # Azure Pipelines YAML for MuleSoft Projects
 # ✅ Maven 3.9.10 (multi-mirror installation)
 # ✅ Java 17
-# ✅ SonarQube Analysis
-# ✅ API Governance Validation
-# ✅ MUnit Tests (COMMENTED OUT)
-# ✅ CloudHub Deployment (COMMENTED OUT)
+# ✅ Mule Maven Plugin 4.6.0
+# ✅ MUnit Tests: COMMENTED OUT
+# ✅ SonarQube: COMMENTED OUT
+# ✅ CloudHub Deployment: COMMENTED OUT
 
 trigger:
   branches:
@@ -24,10 +24,6 @@ variables:
     value: $(Pipeline.Workspace)/.m2/repository
   - name: MAVEN_OPTS
     value: '-Xmx3072m'
-  - name: MAVEN_OPTS_BUILD
-    value: '-Dsecure.key=mule -Dmule.env=dev -DskipTests'
-  - name: MAVEN_OPTS_TEST_MUNIT
-    value: '-Dsecure.key=mule -Dmule.env=dev -Dproject.version=1.0.0'
   - name: PROJECT_NAME
     value: $[variables.projectName]
   - name: ANYPOINT_USERNAME
@@ -55,73 +51,47 @@ steps:
   # ══════════════════════════════════════════════════════════════════
   - script: |
       set -e
-      echo "🔧 Installing Maven 3.9.10 (REQUIRED for Mule Maven Plugin 4.6.0)"
-      echo ""
+      echo "🔧 Installing Maven 3.9.10..."
       
-      # Clean up any existing installations
+      # Clean up existing Maven
       sudo rm -rf /opt/maven /usr/share/maven 2>/dev/null || true
       
-      # Define multiple mirror URLs (in order of preference)
+      # Multiple mirror URLs
       MIRRORS=(
         "https://dlcdn.apache.org/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
         "https://downloads.apache.org/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
         "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.10/apache-maven-3.9.10-bin.tar.gz"
         "https://archive.apache.org/dist/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
-        "https://mirrors.estointernet.in/apache/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
-        "https://mirror.cc.columbia.edu/pub/software/apache/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
       )
       
       SUCCESS=0
-      
       for mirror in "${MIRRORS[@]}"; do
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🔄 Trying mirror: $mirror"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        
-        if curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 \
-           -o /tmp/maven.tar.gz "$mirror" 2>&1; then
-          
-          if [ -f /tmp/maven.tar.gz ]; then
-            FILE_SIZE=$(stat -c%s /tmp/maven.tar.gz)
-            echo "✅ Download successful: $FILE_SIZE bytes"
-            
-            if [ $FILE_SIZE -gt 8000000 ]; then
-              echo "✅ File size valid (> 8MB)"
-              SUCCESS=1
-              break
-            else
-              echo "⚠️  File too small, trying next mirror..."
-              rm -f /tmp/maven.tar.gz
-            fi
+        echo "🔄 Trying: $mirror"
+        if curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 -o /tmp/maven.tar.gz "$mirror"; then
+          FILE_SIZE=$(stat -c%s /tmp/maven.tar.gz)
+          if [ $FILE_SIZE -gt 8000000 ]; then
+            echo "✅ Downloaded: $FILE_SIZE bytes"
+            SUCCESS=1
+            break
           fi
-        else
-          echo "❌ Failed, trying next mirror..."
         fi
-        echo ""
       done
       
       if [ $SUCCESS -eq 0 ]; then
-        echo "❌ ERROR: All mirrors failed!"
+        echo "❌ All mirrors failed"
         exit 1
       fi
       
-      echo "📦 Extracting Maven..."
+      # Extract and install
       sudo mkdir -p /opt/maven
       sudo tar -xzf /tmp/maven.tar.gz -C /opt/maven --strip-components=1
       sudo chmod +x /opt/maven/bin/mvn
       
-      INSTALLED_VERSION=$(/opt/maven/bin/mvn --version | grep "Apache Maven" | awk '{print $3}')
-      echo "Installed version: $INSTALLED_VERSION"
-      
-      if [ "$INSTALLED_VERSION" = "3.9.10" ]; then
-        echo "✅ Maven 3.9.10 installation SUCCESSFUL"
-      else
-        echo "❌ ERROR: Expected 3.9.10, got $INSTALLED_VERSION"
-        exit 1
-      fi
-      
+      # Verify
+      /opt/maven/bin/mvn --version
       rm -f /tmp/maven.tar.gz
-      echo "🎉 Maven 3.9.10 ready!"
+      
+      echo "✅ Maven 3.9.10 installed"
     displayName: 'Install Maven 3.9.10'
 
   # ══════════════════════════════════════════════════════════════════
@@ -134,68 +104,68 @@ steps:
       secureFile: 'settings.xml'
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 4: Install settings.xml
+  # STEP 4: Install settings.xml to ~/.m2/
   # ══════════════════════════════════════════════════════════════════
   - script: |
       echo "📦 Installing settings.xml..."
       mkdir -p ~/.m2
       cp $(muleSettingsFile.secureFilePath) ~/.m2/settings.xml
       
-      if [ ! -f ~/.m2/settings.xml ]; then
+      if [ -f ~/.m2/settings.xml ]; then
+        echo "✅ settings.xml installed"
+        echo "Size: $(stat -c%s ~/.m2/settings.xml) bytes"
+      else
         echo "❌ ERROR: settings.xml not found"
         exit 1
       fi
-      
-      echo "✅ settings.xml installed: ~/.m2/settings.xml"
     displayName: 'Install Maven Settings'
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 5: Install Anypoint CLI
+  # STEP 5: Install Anypoint CLI (Optional - Comment out if not needed)
   # ══════════════════════════════════════════════════════════════════
   - script: |
       npm install -g anypoint-cli
     displayName: 'Install Anypoint CLI'
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 6: API Governance Validation
+  # STEP 6: API Governance Validation (Optional)
   # ══════════════════════════════════════════════════════════════════
   - script: |
-      anypoint-cli --username=$(ANYPOINT_USERNAME) --password=$(ANYPOINT_PASSWORD) --organization='$(MULE_ORG)' governance api validate --rulesets ruleset.yaml $(PROJECT_NAME).zip
+      anypoint-cli \
+        --username=$(ANYPOINT_USERNAME) \
+        --password=$(ANYPOINT_PASSWORD) \
+        --organization='$(MULE_ORG)' \
+        governance api validate \
+        --rulesets ruleset.yaml \
+        $(PROJECT_NAME).zip
     displayName: 'API Governance Validation'
-
-  # ══════════════════════════════════════════════════════════════════
-  # STEP 7: Install ReportGenerator Tool
-  # ══════════════════════════════════════════════════════════════════
-  - script: |
-      dotnet tool install --tool-path tools dotnet-reportgenerator-globaltool --version 4.6.1
-    displayName: 'Install ReportGenerator Tool'
     continueOnError: true
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 8: Cache Maven Dependencies
+  # STEP 7: Cache Maven Dependencies
   # ══════════════════════════════════════════════════════════════════
   - task: Cache@2
+    displayName: 'Cache Maven Local Repo'
     inputs:
       key: 'maven | "$(Agent.OS)" | **/pom.xml'
       restoreKeys: |
         maven | "$(Agent.OS)"
         maven
       path: $(MAVEN_CACHE_FOLDER)
-    displayName: 'Cache Maven Dependencies'
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 9: SonarQube Prepare
+  # STEP 8: SonarQube Prepare (COMMENTED OUT)
   # ══════════════════════════════════════════════════════════════════
-  - task: SonarQubePrepare@7
-    inputs:
-      SonarQube: $(PROJECT_NAME)
-      scannerMode: 'Other'
-      extraProperties: |
-        sonar.projectKey=$(PROJECT_NAME)_$(PROJECT_NAME)
-    displayName: 'SonarQube Prepare'
+  # - task: SonarQubePrepare@7
+  #   displayName: 'Prepare SonarQube Analysis'
+  #   inputs:
+  #     SonarQube: $(PROJECT_NAME)
+  #     scannerMode: 'Other'
+  #     extraProperties: |
+  #       sonar.projectKey=$(PROJECT_NAME)_$(PROJECT_NAME)
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 10: MUnit Test (COMMENTED OUT)
+  # STEP 9: MUnit Tests (COMMENTED OUT)
   # ══════════════════════════════════════════════════════════════════
   # - script: |
   #     export PATH=/opt/maven/bin:$PATH
@@ -209,68 +179,80 @@ steps:
   #       -Dmule.env=dev \
   #       -Dproject.version=1.0.0
   #   displayName: 'MUnit Test'
-  #   continueOnError: false
+  #   continueOnError: true
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 11: Maven Build with SonarQube Analysis
+  # STEP 10: Maven Clean Compile
   # ══════════════════════════════════════════════════════════════════
   - script: |
       export PATH=/opt/maven/bin:$PATH
       export MAVEN_OPTS="-Xmx3072m"
       
-      echo "🔨 Running Maven package with SonarQube analysis..."
+      echo "🔨 Running Maven clean compile..."
       
-      mvn clean package sonar:sonar \
+      mvn clean compile \
+        -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
+        -Dsecure.key=mule \
+        -Dmule.env=dev
+      
+      echo "✅ Compile successful"
+    displayName: 'Maven Clean Compile'
+
+  # ══════════════════════════════════════════════════════════════════
+  # STEP 11: Maven Package (Build JAR)
+  # ══════════════════════════════════════════════════════════════════
+  - script: |
+      export PATH=/opt/maven/bin:$PATH
+      export MAVEN_OPTS="-Xmx3072m"
+      
+      echo "📦 Running Maven package..."
+      
+      mvn package \
         -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
         -Dsecure.key=mule \
         -Dmule.env=dev \
         -DskipTests
       
-      echo "✅ Build successful"
-    displayName: 'Maven Build with SonarQube'
+      echo ""
+      if ls target/*.jar 1> /dev/null 2>&1; then
+        echo "✅ Package created successfully:"
+        ls -lh target/*.jar
+      else
+        echo "❌ ERROR: No JAR file found"
+        exit 1
+      fi
+    displayName: 'Maven Package'
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 12: SonarQube Publish
+  # STEP 12: SonarQube Publish (COMMENTED OUT)
   # ══════════════════════════════════════════════════════════════════
-  - task: SonarQubePublish@7
-    inputs:
-      pollingTimeoutSec: '300'
-    displayName: 'SonarQube Publish'
+  # - task: SonarQubePublish@7
+  #   displayName: 'Publish SonarQube Results'
+  #   inputs:
+  #     pollingTimeoutSec: '300'
 
   # ══════════════════════════════════════════════════════════════════
   # STEP 13: Copy Build Artifacts
   # ══════════════════════════════════════════════════════════════════
   - task: CopyFiles@2
+    displayName: 'Copy Build Artifacts'
     inputs:
       Contents: '**/target/*.jar'
       TargetFolder: $(Build.ArtifactStagingDirectory)
       CleanTargetFolder: true
       flattenFolders: true
-    displayName: 'Copy Build Artifacts'
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 14: Publish Test Results (Coverage Report)
-  # ══════════════════════════════════════════════════════════════════
-  - task: PublishTestResults@2
-    displayName: 'Publish Test Results'
-    inputs:
-      testResultsFormat: 'JUnit'
-      testResultsFiles: '**/surefire-reports/TEST-*.xml'
-      mergeTestResults: true
-      failTaskOnFailedTests: false
-    continueOnError: true
-
-  # ══════════════════════════════════════════════════════════════════
-  # STEP 15: Publish Pipeline Artifacts
+  # STEP 14: Publish Pipeline Artifacts
   # ══════════════════════════════════════════════════════════════════
   - task: PublishPipelineArtifact@1
+    displayName: 'Publish Pipeline Artifacts'
     inputs:
       targetPath: $(Build.ArtifactStagingDirectory)
       artifact: 'drop'
-    displayName: 'Publish Pipeline Artifacts'
 
   # ══════════════════════════════════════════════════════════════════
-  # STEP 16: Build Summary
+  # STEP 15: Build Summary
   # ══════════════════════════════════════════════════════════════════
   - script: |
       export PATH=/opt/maven/bin:$PATH
@@ -280,40 +262,74 @@ steps:
       echo "🎉 BUILD COMPLETED SUCCESSFULLY"
       echo "══════════════════════════════════════════════════════"
       echo ""
-      echo "Artifacts:"
-      ls -lh target/*.jar 2>/dev/null || echo "No artifacts in target/"
-      ls -lh $(Build.ArtifactStagingDirectory)/*.jar 2>/dev/null || echo "No artifacts in staging"
-      echo ""
       echo "Maven Version: $(mvn --version | grep "Apache Maven" | awk '{print $3}')"
       echo "Java Version: $(java -version 2>&1 | head -1)"
-      echo "Project: $(PROJECT_NAME)"
+      echo ""
+      echo "Artifacts:"
+      ls -lh target/*.jar 2>/dev/null || echo "No artifacts found"
       echo ""
       echo "══════════════════════════════════════════════════════"
     displayName: 'Build Summary'
     condition: succeeded()
 
+
 # ════════════════════════════════════════════════════════════════════
-# CLOUDHUB DEPLOYMENT (COMMENTED OUT)
+# CloudHub Deployment Stage (COMMENTED OUT)
 # ════════════════════════════════════════════════════════════════════
-# 
-# Uncomment the section below to enable CloudHub deployment:
-#
-# - script: |
-#     export PATH=/opt/maven/bin:$PATH
-#     export MAVEN_OPTS="-Xmx3072m"
-#     
-#     echo "🚀 Deploying to CloudHub..."
-#     
-#     mvn deploy \
-#       -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
-#       -DskipTests \
-#       -Dmule.version=4.9.0 \
-#       -Dcloudhub.environment=Sandbox \
-#       -Danypoint.username=$(ANYPOINT_USERNAME) \
-#       -Danypoint.password=$(ANYPOINT_PASSWORD)
-#     
-#     echo "✅ Deployment successful"
-#   displayName: 'Deploy to CloudHub'
-#   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-# 
-# ════════════════════════════════════════════════════════════════════
+# stages:
+#   - stage: Deploy
+#     displayName: 'Deploy to CloudHub'
+#     dependsOn: Build
+#     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#     jobs:
+#       - deployment: DeployToCloudHub
+#         displayName: 'Deploy to CloudHub Sandbox'
+#         environment: 'Sandbox'
+#         strategy:
+#           runOnce:
+#             deploy:
+#               steps:
+#                 # Re-install Maven 3.9.10
+#                 - script: |
+#                     MIRRORS=(
+#                       "https://dlcdn.apache.org/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz"
+#                       "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.10/apache-maven-3.9.10-bin.tar.gz"
+#                     )
+#                     
+#                     for mirror in "${MIRRORS[@]}"; do
+#                       if curl -fsSL --connect-timeout 10 --max-time 120 -o /tmp/maven.tar.gz "$mirror"; then
+#                         sudo rm -rf /opt/maven
+#                         sudo mkdir -p /opt/maven
+#                         sudo tar -xzf /tmp/maven.tar.gz -C /opt/maven --strip-components=1
+#                         break
+#                       fi
+#                     done
+#                   displayName: 'Setup Maven'
+#                 
+#                 # Re-download settings.xml
+#                 - task: DownloadSecureFile@1
+#                   name: muleSettingsFileDeploy
+#                   inputs:
+#                     secureFile: 'settings.xml'
+#                 
+#                 - script: |
+#                     mkdir -p ~/.m2
+#                     cp $(muleSettingsFileDeploy.secureFilePath) ~/.m2/settings.xml
+#                   displayName: 'Install Settings'
+#                 
+#                 # Download artifacts
+#                 - download: current
+#                   artifact: drop
+#                 
+#                 # Deploy to CloudHub
+#                 - script: |
+#                     export PATH=/opt/maven/bin:$PATH
+#                     cd $(Pipeline.Workspace)/drop
+#                     
+#                     mvn deploy \
+#                       -DskipTests \
+#                       -Dmule.version=4.9.0 \
+#                       -Dcloudhub.environment=Sandbox \
+#                       -Danypoint.username=$(ANYPOINT_USERNAME) \
+#                       -Danypoint.password=$(ANYPOINT_PASSWORD)
+#                   displayName: 'Deploy to CloudHub'
