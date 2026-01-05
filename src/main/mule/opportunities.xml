@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core ./knowledge-base/schemas/mule-core.xsd
+        http://www.mulesoft.org/schema/mule/ee/core ./knowledge-base/schemas/mule-core.xsd
+        http://www.mulesoft.org/schema/mule/salesforce ./knowledge-base/schemas/mule-salesforce.xsd">
+
+  <flow name="post-opportunities-flow" doc:name="POST Opportunities Flow" doc:id="doc-ece63b35">
+    <ee:transform doc:name="Prepare Opportunity Object" doc:id="doc-632bcfab">
+      <ee:message doc:id="doc-e3785ab8">
+        <ee:set-payload doc:id="doc-10f109ce" resource="dw/prepare-opportunity-object-9.dwl"></ee:set-payload>
+      </ee:message>
+    </ee:transform>
+    <salesforce:create config-ref="Salesforce_Config" type="Opportunity" doc:name="Create Opportunity in Salesforce" doc:id="doc-cd8f8d7f"></salesforce:create>
+    <ee:transform doc:name="Transform Response" doc:id="doc-7edcb09f">
+      <ee:message doc:id="doc-2ed4d324">
+        <ee:set-payload doc:id="doc-15110b51" resource="dw/transform-response-10.dwl"></ee:set-payload>
+      </ee:message>
+    </ee:transform>
+    <error-handler ref="globalErrorHandler"></error-handler>
+  </flow>
+
+  <flow name="get-opportunities-flow" doc:name="GET Opportunities Flow" doc:id="doc-5d6707e9">
+    <ee:transform doc:name="Prepare Query" doc:id="doc-761fd6f2">
+      <ee:message doc:id="doc-a5112385">
+        <ee:set-payload doc:id="doc-93928643" resource="dw/prepare-query-11.dwl"></ee:set-payload>
+      </ee:message>
+    </ee:transform>
+    <salesforce:query config-ref="Salesforce_Config" doc:name="Query Opportunities from Salesforce" doc:id="doc-bd07a4a6">
+      <salesforce:salesforce-query doc:id="doc-83c7f3f5">
+        #[payload.query]
+      </salesforce:salesforce-query>
+    </salesforce:query>
+    <ee:transform doc:name="Transform Response" doc:id="doc-aaca6d23">
+      <ee:message doc:id="doc-dc9e3ba2">
+        <ee:set-payload doc:id="doc-ded186d6" resource="dw/transform-response-12.dwl"></ee:set-payload>
+      </ee:message>
+    </ee:transform>
+    <error-handler ref="globalErrorHandler"></error-handler>
+  </flow>
+
+  <flow name="put-opportunities-flow" doc:name="PUT Opportunities Flow" doc:id="doc-21b877d3">
+    <ee:transform doc:name="Prepare Opportunity Update" doc:id="doc-cbac0d24">
+      <ee:message doc:id="doc-482ad345">
+        <ee:set-payload doc:id="doc-20bf53b9" resource="dw/prepare-opportunity-update-13.dwl"></ee:set-payload>
+      </ee:message>
+    </ee:transform>
+    <salesforce:update config-ref="Salesforce_Config" type="Opportunity" doc:name="Update Opportunity in Salesforce" doc:id="doc-3d90dc55"></salesforce:update>
+    <ee:transform doc:name="Transform Response" doc:id="doc-8aa6c383">
+      <ee:message doc:id="doc-983dea90">
+        <ee:set-payload doc:id="doc-008ed130" resource="dw/transform-response-14.dwl"></ee:set-payload>
+      </ee:message>
+    </ee:transform>
+    <error-handler ref="globalErrorHandler"></error-handler>
+  </flow>
+
+  <flow name="delete-opportunities-flow" doc:name="DELETE Opportunities Flow" doc:id="doc-9f572055">
+    <ee:transform doc:name="Prepare Opportunity ID" doc:id="doc-4c4de8c6">
+      <ee:message doc:id="doc-101e3bd2">
+        <ee:set-payload doc:id="doc-9c64807a" resource="dw/prepare-opportunity-id-15.dwl"></ee:set-payload>
+      </ee:message>
+    </ee:transform>
+    <salesforce:delete config-ref="Salesforce_Config" doc:name="Delete Opportunity from Salesforce" doc:id="doc-38ce793b"></salesforce:delete>
+    <ee:transform doc:name="Transform Response" doc:id="doc-a24a989e">
+      <ee:message doc:id="doc-94051553">
+        <ee:set-payload doc:id="doc-851cd25c" resource="dw/transform-response-16.dwl"></ee:set-payload>
+      </ee:message>
+    </ee:transform>
+    <error-handler ref="globalErrorHandler"></error-handler>
+  </flow>
+
+</mule>

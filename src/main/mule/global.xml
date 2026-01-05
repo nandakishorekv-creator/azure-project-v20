@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit"
+      xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:tls="http://www.mulesoft.org/schema/mule/tls"
+      xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core ./knowledge-base/schemas/mule-core.xsd
+        http://www.mulesoft.org/schema/mule/apikit ./knowledge-base/schemas/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/secure-properties ./knowledge-base/schemas/mule-secure-properties.xsd
+        http://www.mulesoft.org/schema/mule/http ./knowledge-base/schemas/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/tls ./knowledge-base/schemas/mule-core.xsd
+        http://www.mulesoft.org/schema/mule/salesforce ./knowledge-base/schemas/mule-salesforce.xsd">
+  <configuration defaultErrorHandler-ref="globalErrorHandler"></configuration>
+  <apikit:config name="apiSalesforceSapiConfig" raml="api.raml" outboundHeadersMapName="outboundHeaders" httpStatusVarName="httpStatus" doc:name="APIKit Router Config"></apikit:config>
+  <configuration-properties doc:name="Configuration properties" file="properties/common-properties.yaml"></configuration-properties>
+  <secure-properties:config name="Secure_Properties_Config" file="properties/secure-${mule.env}.yaml" key="${encryption.key}" doc:name="Secure Properties Config"></secure-properties:config>
+  <http:listener-config name="HTTPS_Listener_Config" doc:name="HTTPS Listener Config" doc:id="doc-c7f47baa">
+    <http:listener-connection host="${http.host}" port="${http.port}" protocol="${http.protocol}" tlsContext="TLS_Context" doc:id="doc-c293a2d0" readTimeout="${http.timeout}"></http:listener-connection>
+  </http:listener-config>
+  <tls:context name="TLS_Context" doc:name="TLS Context" doc:id="doc-c6ac0ed7">
+    <tls:key-store path="${tls.keystore.path}" password="${secure::tls.keystore.password}" alias="${tls.keystore.alias}" keyPassword="${secure::tls.key.password}" doc:id="doc-9771a132"></tls:key-store>
+  </tls:context>
+  <salesforce:sfdc-config name="Salesforce_Config" doc:name="Salesforce Config" doc:id="doc-8ca24a8c">
+    <salesforce:basic-connection username="${secure::salesforce.username}" password="${secure::salesforce.password}" securityToken="${secure::salesforce.securityToken}" doc:id="doc-045f8b7e" url="${salesforce.url}"></salesforce:basic-connection>
+  </salesforce:sfdc-config>
+
+</mule>

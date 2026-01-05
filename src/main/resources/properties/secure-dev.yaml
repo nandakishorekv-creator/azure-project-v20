@@ -1,0 +1,9 @@
+tls:
+  keystore:
+    password: ""
+  key:
+    password: ""
+salesforce:
+  username: ""
+  password: ""
+  securityToken: ""
