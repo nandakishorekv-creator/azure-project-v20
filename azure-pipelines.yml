@@ -1,5 +1,5 @@
 # Azure Pipelines YAML for MuleSoft Projects
-# ✅ FIXED: Using Maven@4 task (no manual download needed)
+# ✅ FIXED: Path to settings.xml (removed -s flag, using default location)
 # ✅ Java 17 + Mule Maven Plugin 4.6.0
 # ✅ Connected App authentication via settings.xml from Secure Files
 
@@ -46,6 +46,7 @@ stages:
                 echo "✅ Verified: settings.xml exists"
                 FILE_SIZE=$(stat -c%s ~/.m2/settings.xml)
                 echo "File size: $FILE_SIZE bytes"
+                echo "Absolute path: $(readlink -f ~/.m2/settings.xml)"
               else
                 echo "❌ ERROR: settings.xml not found!"
                 exit 1
@@ -101,6 +102,13 @@ stages:
               echo ""
               echo "=== Settings Location ==="
               ls -lh ~/.m2/settings.xml
+              echo "Absolute path: $(readlink -f ~/.m2/settings.xml)"
+              
+              echo ""
+              echo "=== Home Directory ==="
+              echo "HOME=$HOME"
+              echo "User: $(whoami)"
+              echo "Working directory: $(pwd)"
               
               echo ""
               echo "=== POM Configuration ==="
@@ -121,13 +129,14 @@ stages:
             displayName: 'Verify Build Environment'
 
           # ✅ STEP 6: Maven Validate (test authentication)
+          # ⚠️ NO -s flag needed - Maven auto-uses ~/.m2/settings.xml
           - task: Maven@4
             displayName: 'Maven Validate (Test Auth)'
             continueOnError: true
             inputs:
               mavenPomFile: 'pom.xml'
               goals: 'validate'
-              options: '-s ~/.m2/settings.xml -X -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
+              options: '-X -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
               publishJUnitResults: false
               javaHomeOption: 'JDKVersion'
               jdkVersionOption: '1.17'
@@ -140,7 +149,7 @@ stages:
             inputs:
               mavenPomFile: 'pom.xml'
               goals: 'clean compile'
-              options: '-s ~/.m2/settings.xml -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev'
+              options: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev'
               publishJUnitResults: false
               javaHomeOption: 'JDKVersion'
               jdkVersionOption: '1.17'
@@ -154,7 +163,7 @@ stages:
           #   inputs:
           #     mavenPomFile: 'pom.xml'
           #     goals: 'test'
-          #     options: '-s ~/.m2/settings.xml -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev'
+          #     options: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev'
           #     publishJUnitResults: true
           #     testResultsFiles: '**/surefire-reports/TEST-*.xml'
           #     javaHomeOption: 'JDKVersion'
@@ -168,7 +177,7 @@ stages:
             inputs:
               mavenPomFile: 'pom.xml'
               goals: 'package'
-              options: '-s ~/.m2/settings.xml -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev -DskipTests'
+              options: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) -Dsecure.key=mule -Dmule.env=dev -DskipTests'
               publishJUnitResults: false
               javaHomeOption: 'JDKVersion'
               jdkVersionOption: '1.17'
@@ -178,7 +187,7 @@ stages:
           # ✅ STEP 10: Verify Package Created
           - script: |
               echo "📦 Verifying package creation..."
-              if [ -f target/*.jar ]; then
+              if ls target/*.jar 1> /dev/null 2>&1; then
                 echo "✅ Package created successfully:"
                 ls -lh target/*.jar
               else
@@ -236,13 +245,13 @@ stages:
   #                 artifact: drop
   #                 displayName: 'Download Build Artifacts'
 
-  #               # Deploy to CloudHub
+  #               # Deploy to CloudHub (no -s flag needed)
   #               - task: Maven@4
   #                 displayName: 'Deploy to CloudHub'
   #                 inputs:
   #                   mavenPomFile: '$(Pipeline.Workspace)/drop/pom.xml'
   #                   goals: 'deploy'
-  #                   options: '-s ~/.m2/settings.xml -DskipTests -Dmule.version=4.9.0 -Dcloudhub.environment=Sandbox -Danypoint.username=$(anypointUsername) -Danypoint.password=$(anypointPassword)'
+  #                   options: '-DskipTests -Dmule.version=4.9.0 -Dcloudhub.environment=Sandbox -Danypoint.username=$(anypointUsername) -Danypoint.password=$(anypointPassword)'
   #                   publishJUnitResults: false
   #                   javaHomeOption: 'JDKVersion'
   #                   jdkVersionOption: '1.17'
